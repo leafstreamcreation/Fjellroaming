@@ -1,31 +1,21 @@
 const axios = require('axios');
-const { kMaxLength } = require('buffer');
-const fs = require('fs');
 require('dotenv').config();
 
 // Configuration - Update these values for your setup
 const config = {
-  porkbun: {
-    apiKey: process.env.PORKBUN_API_KEY || 'your-porkbun-api-key',
-    secretKey: process.env.PORKBUN_SECRET_KEY || 'your-porkbun-secret-key'
+  dnsProvider: {
+    endpoint: process.env.DNSP_ENDPOINT || 'https://api.dnsprovider.com/v1', // Example endpoint
+    apiKey: process.env.DNSP_API_KEY || 'your-dns-provider-api-key',
+    secretKey: process.env.DNSP_API_SECRET || 'your-dns-provider-secret-key'
   },
-  domains: [
-    {
-      domain: 'fjellworks.dev',
-      subdomain: '' // Leave empty for root domain, or specify subdomain
-    },
-    {
-        domain: '*.fjellworks.dev',
-        subdomain: '' // Leave empty for root domain, or specify subdomain
-    },
-    {
-        domain: 'mail.fjellworks.dev',
-        subdomain: '' // Leave empty for root domain, or specify subdomain
-    }
-  ],
+  ddnsProvider: {
+    endpoint: process.env.DDNSP_ENDPOINT || 'https://api.dnsprovider.com/v1/getip', // Example endpoint
+    apiKey: process.env.DDNSP_API_KEY || 'your-ddns-provider-api-key'
+  },
+  domains: process.env.DOMAINS ? process.env.DOMAINS.split(',') : ['yourdomain.com'], // Comma-separated list of domains
   files: {
-    lastIp: './last-ip.txt',
-    log: './ddns-updater.log'
+    lastIp: process.env.LAST_IP_FILE || './last-ip.txt',
+    log: process.env.LOG_FILE || './ddns-updater.log'
   },
 };
 
@@ -65,27 +55,27 @@ function storeIp(ip) {
 async function getRouterPublicIp() {
   log('Attempting to detect router public IP...');
     try {
-    const response = await axios.get(process.env.DDNS_PROVIDER, {
+    const response = await axios.get(config.ddnsProvider.endpoint, {
         headers: {
             'Accept': 'application/json',
-            'API-Key': process.env.DDNS_API_KEY
+            'API-Key': config.ddnsProvider.apiKey
         },
         timeout: 10000
     });
     log(`Detected public IP via external service: ${response.data}`);
     return response.data.domains[0].ipv4Address;
   } catch (error) {
-    log(`All IP detection methods failed: ${error.message}`, 'ERROR');
+    log(`IP detection failed: ${error.message}`, 'ERROR');
     return null;
   }
 }
 
-async function updatePorkbunDns(domain, ip) {
+async function updateDnsRecord(domain, ip) {
   try {
     // First, get the record ID
-    const response = await axios.post('https://porkbun.com/api/json/v3/dns/retrieve/' + domain.domain, {
-      apikey: config.porkbun.apiKey,
-      secretapikey: config.porkbun.secretKey
+    const response = await axios.post(`${config.dnsProvider.endpoint}/${domain}`, {
+      apikey: config.dnsProvider.apiKey,
+      secretapikey: config.dnsProvider.secretKey
     });
     
     if (response.data.status !== 'SUCCESS') {
@@ -100,29 +90,10 @@ async function updatePorkbunDns(domain, ip) {
         break;
       }
     }
-    
-    if (!recordId) {
-      // Record doesn't exist, create it
-      const createResponse = await axios.post('https://porkbun.com/api/json/v3/dns/create/' + domain.domain, {
-        apikey: config.porkbun.apiKey,
-        secretapikey: config.porkbun.secretKey,
-        name: domain.subdomain,
-        type: 'A',
-        content: ip,
-        ttl: '600'
-      });
-      
-      if (createResponse.data.status === 'SUCCESS') {
-        log(`Created A record for ${domain.subdomain || '@'}.${domain.domain} with IP: ${ip}`);
-        return true;
-      } else {
-        throw new Error(createResponse.data.message || 'Failed to create DNS record');
-      }
-    } else {
       // Update existing record
-      const updateResponse = await axios.post('https://porkbun.com/api/json/v3/dns/edit/' + domain.domain + '/' + recordId, {
-        apikey: config.porkbun.apiKey,
-        secretapikey: config.porkbun.secretKey,
+      const updateResponse = await axios.post(`${config.dnsProvider.endpoint}/${domain}/${recordId}`, {
+        apikey: config.dnsProvider.apiKey,
+        secretapikey: config.dnsProvider.secretKey,
         name: domain.subdomain,
         type: 'A',
         content: ip,
@@ -135,8 +106,7 @@ async function updatePorkbunDns(domain, ip) {
       } else {
         throw new Error(updateResponse.data.message || 'Failed to update DNS record');
       }
-    }
-  } catch (error) {
+    } catch (error) {
     log(`Error updating DNS record: ${error.message}`, 'ERROR');
     return false;
   }
@@ -155,6 +125,9 @@ async function checkAndUpdateDns() {
   
   // Get last stored IP
   const storedIp = getStoredIp();
+  if (!storedIp) {
+    log('No stored IP found, assuming first run');
+  }
   
   // If IP hasn't changed, no update needed
   if (storedIp === currentIp) {
@@ -170,7 +143,7 @@ async function checkAndUpdateDns() {
   for (const domain of config.domains) {
     
     // Update DNS record
-    const success = await updatePorkbunDns(domain, currentIp);
+    const success = await updateDnsRecord(domain, currentIp);
     if (!success) {
       allUpdatesSuccessful = false;
     }
@@ -184,10 +157,6 @@ async function checkAndUpdateDns() {
     log('Some DNS updates failed, will retry on next check', 'WARNING');
   }
 }
-
-// Initialize and schedule the job
-log('Porkbun DDNS Updater started');
-log(`Configuration: ${JSON.stringify(config, null, 2)}`);
 
 // Run immediately on startup
 checkAndUpdateDns();
