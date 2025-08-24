@@ -1,4 +1,5 @@
 const axios = require('axios');
+const fs = require('fs');
 require('dotenv').config();
 
 // Configuration - Update these values for your setup
@@ -12,7 +13,8 @@ const config = {
     endpoint: process.env.DDNSP_ENDPOINT || 'https://api.dnsprovider.com/v1/getip', // Example endpoint
     apiKey: process.env.DDNSP_API_KEY || 'your-ddns-provider-api-key'
   },
-  domains: process.env.DOMAINS ? process.env.DOMAINS.split(',') : ['yourdomain.com'], // Comma-separated list of domains
+  domain: process.env.DOMAIN || 'yourdomain.com',
+  subDomains: process.env.SUBDOMAINS ? process.env.SUBDOMAINS.split(',') : [''], // Comma-separated list of subdomains
   files: {
     lastIp: process.env.LAST_IP_FILE || './last-ip.txt',
     log: process.env.LOG_FILE || './ddns-updater.log'
@@ -70,43 +72,22 @@ async function getRouterPublicIp() {
   }
 }
 
-async function updateDnsRecord(domain, ip) {
+async function updateDnsRecord(subdomain, ip) {
   try {
-    // First, get the record ID
-    const response = await axios.post(`${config.dnsProvider.endpoint}/${domain}`, {
+    const response = await axios.post(`${config.dnsProvider.endpoint}/${config.domain}/A/${subdomain}`, {
       apikey: config.dnsProvider.apiKey,
-      secretapikey: config.dnsProvider.secretKey
+      secretapikey: config.dnsProvider.secretKey,
+      content: ip,
+      ttl: '600'
     });
     
     if (response.data.status !== 'SUCCESS') {
-      throw new Error('Failed to retrieve DNS records');
+      throw new Error('Failed to update DNS record');
     }
     
-    let recordId = null;
-    const records = response.data.records;
-    for (const record of records) {
-      if (record.type === 'A' && record.name === (domain.subdomain ? domain.subdomain + '.' + domain.domain : domain.domain)) {
-        recordId = record.id;
-        break;
-      }
-    }
-      // Update existing record
-      const updateResponse = await axios.post(`${config.dnsProvider.endpoint}/${domain}/${recordId}`, {
-        apikey: config.dnsProvider.apiKey,
-        secretapikey: config.dnsProvider.secretKey,
-        name: domain.subdomain,
-        type: 'A',
-        content: ip,
-        ttl: '600'
-      });
-      
-      if (updateResponse.data.status === 'SUCCESS') {
-        log(`Updated A record for ${domain.subdomain || '@'}.${domain.domain} to IP: ${ip}`);
-        return true;
-      } else {
-        throw new Error(updateResponse.data.message || 'Failed to update DNS record');
-      }
-    } catch (error) {
+    log(`DNS record updated successfully for ${subdomain}.${config.domain} -> ${ip}`);
+    return true;
+  } catch (error) {
     log(`Error updating DNS record: ${error.message}`, 'ERROR');
     return false;
   }
@@ -139,11 +120,11 @@ async function checkAndUpdateDns() {
   
   // Update all configured domains
   let allUpdatesSuccessful = true;
-  
-  for (const domain of config.domains) {
-    
+
+  for (const subdomain of config.subDomains) {
+
     // Update DNS record
-    const success = await updateDnsRecord(domain, currentIp);
+    const success = await updateDnsRecord(subdomain, currentIp);
     if (!success) {
       allUpdatesSuccessful = false;
     }
@@ -160,3 +141,10 @@ async function checkAndUpdateDns() {
 
 // Run immediately on startup
 checkAndUpdateDns();
+const id = setInterval(checkAndUpdateDns, process.env.CHECK_INTERVAL || 600000); // Every 10 minutes
+
+process.on('SIGINT', () => {
+  clearInterval(id);
+  log('Shutting down DDNS updater');
+  process.exit();
+});

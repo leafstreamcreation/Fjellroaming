@@ -30,3 +30,6 @@ node_modules/
 *.xz
 *.bak
 *.old
+
+# Data directory (contains logs and state files)
+data/

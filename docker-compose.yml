@@ -1,0 +1,37 @@
+
+services:
+  ddns-updater:
+    build: .
+    container_name: ddns-updater
+    restart: unless-stopped
+    environment:
+      # DNS Provider Configuration
+      - DNSP_ENDPOINT=${DNSP_ENDPOINT:-https://api.dnsprovider.com/v1}
+      - DNSP_API_KEY=${DNSP_API_KEY}
+      - DNSP_API_SECRET=${DNSP_API_SECRET}
+      
+      # DDNS Provider Configuration
+      - DDNSP_ENDPOINT=${DDNSP_ENDPOINT:-https://api.dnsprovider.com/v1/getip}
+      - DDNSP_API_KEY=${DDNSP_API_KEY}
+      
+      # Domain Configuration
+      - DOMAIN=${DOMAIN:-yourdomain.com}
+      - SUBDOMAINS=${SUBDOMAINS:-}
+      
+      # File paths (mapped to container paths)
+      - LAST_IP_FILE=/app/data/last-ip.txt
+      - LOG_FILE=/app/data/ddns-updater.log
+      
+      # Check interval (default: 10 minutes = 600000ms)
+      - CHECK_INTERVAL=${CHECK_INTERVAL:-600000}
+    
+    volumes:
+      # Bind mount for persistent data
+      - ./data:/app/data
+    
+    # Optional: Add logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
