@@ -55,8 +55,8 @@ function storeIp(ip) {
 }
 
 async function getRouterPublicIp() {
-  log('Attempting to detect router public IP...');
-    try {
+  log(`Attempting to detect router public IP: ${config.ddnsProvider.endpoint}`);
+  try {
     const response = await axios.get(config.ddnsProvider.endpoint, {
         headers: {
             'Accept': 'application/json',
@@ -64,7 +64,7 @@ async function getRouterPublicIp() {
         },
         timeout: 10000
     });
-    log(`Detected public IP via external service: ${response.data}`);
+    log(`Detected public IP via external service: ${response.data.domains[0].ipv4Address}`);
     return response.data.domains[0].ipv4Address;
   } catch (error) {
     log(`IP detection failed: ${error.message}`, 'ERROR');
@@ -73,6 +73,7 @@ async function getRouterPublicIp() {
 }
 
 async function updateDnsRecord(subdomain, ip) {
+  log(`Updating DNS record: ${config.dnsProvider.endpoint}/${config.domain}/A/${subdomain} -> ${ip}`);
   try {
     const response = await axios.post(`${config.dnsProvider.endpoint}/${config.domain}/A/${subdomain}`, {
       apikey: config.dnsProvider.apiKey,
@@ -82,7 +83,7 @@ async function updateDnsRecord(subdomain, ip) {
     });
     
     if (response.data.status !== 'SUCCESS') {
-      throw new Error('Failed to update DNS record');
+      throw new Error('Failed to update DNS record : ' + JSON.stringify(response.data.message));
     }
     
     log(`DNS record updated successfully for ${subdomain}.${config.domain} -> ${ip}`);
